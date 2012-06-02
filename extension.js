@@ -1,4 +1,5 @@
-//   Firefox Bookmarks Search Provider for Gnome Shell
+//   Chrome Bookmarks Search Provider for Gnome Shell
+//   Copyright (C) 2012  Pauli Virtanen
 //   Copyright (C) 2011  Stefano Ciancio
 //
 //   This library is free software; you can redistribute it and/or
@@ -15,6 +16,10 @@
 //   License along with this library; if not, write to the Free Software
 //   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 
+//
+// This is based on the Firefox bookmarks search plugin by Stefano Ciancio.
+//
+
 const Main = imports.ui.main;
 const Search = imports.ui.search;
 const Gio = imports.gi.Gio;
@@ -26,102 +31,75 @@ const St = imports.gi.St;
 
 // Settings
 
-// FBSearchProvider holds the instance of the search provider
+// chromeSearchProvider holds the instance of the search provider
 // implementation. If null, the extension is either uninitialized
 // or has been disabled via disable().
-var FBSearchProvider = null;
+var chromeSearchProvider = null;
 
-var bookmarkFileMonitor = null;
-
-
-const FirefoxBookmarksSearchProvider = new Lang.Class({
-    Name: 'FirefoxBookmarksSearchProvider',
+const ChromeBookmarksSearchProvider = new Lang.Class({
+    Name: 'ChromeBookmarksSearchProvider',
     Extends: Search.SearchProvider,
 
     _init: function(name) {
-        Search.SearchProvider.prototype._init.call(this, "FIREFOX BOOKMARKS");
+        Search.SearchProvider.prototype._init.call(this, "CHROME BOOKMARKS");
 
         // Retrieve environment variables
-        this.FirefoxBookmarkBackupsDir = GLib.getenv("FIREFOX_BOOKMARK_BACKUPS_DIR");
-        this.FirefoxBookmarkFile = GLib.getenv("FIREFOX_BOOKMARK_FILE");
+        bookmarkFile = GLib.getenv("CHROME_BOOKMARK_FILE");
 
         // Check environment variables
-        if (this.FirefoxBookmarkFile != null) {
+	this.bookmarkFilePaths = [];
+        if (bookmarkFile != null) {
             // Env Bookmark File defined
-            this.bookmarkFilePath = this.FirefoxBookmarkFile;
-
-        } else if (this.FirefoxBookmarkBackupsDir != null) {
-            // Env Bookmark Dir defined
-            if ( !(this.bookmarkFilePath = this._getBookmarkFilePath(this.FirefoxBookmarkBackupsDir)) ) {
-                return false;
-            }
+            this.bookmarkFilePaths.push(bookmarkFile);
         } else {
             // Default
-            let firefoxProfileFile = GLib.build_filenamev([GLib.get_home_dir(), ".mozilla/firefox/profiles.ini"]);
-            var [result, defaultProfile, defaultIsRelative] = this._getFirefoxDefaultProfile(firefoxProfileFile);
-
-            let mozillaDefaultDirPath = "";
-            if (defaultIsRelative == 1) {
-                mozillaDefaultDirPath = GLib.build_filenamev([GLib.get_home_dir(), ".mozilla/firefox/", 
-                            defaultProfile, "bookmarkbackups/"]);
-            } else {
-                mozillaDefaultDirPath = GLib.build_filenamev([defaultProfile, "bookmarkbackups/"]);
-            }
-
-            if ( !(this.bookmarkFilePath = this._getBookmarkFilePath(mozillaDefaultDirPath)) ) {
-                return false;
+	    let paths = [".config/google-chrome/Default/Bookmarks",
+			 ".config/chromium/Default/Bookmarks"];
+	    for each (var path in paths) {
+		path = GLib.build_filenamev([GLib.get_home_dir(), path]);
+		this.bookmarkFilePaths.push(path);
             }
         }
 
+	// Read the bookmarks
         this._configBookmarks = [];
-
         this._readBookmarks();
 
-        let file = Gio.file_new_for_path(this.bookmarkFilePath);
-        bookmarkFileMonitor = file.monitor(Gio.FileMonitorFlags.NONE, null);
-        bookmarkFileMonitor.connect('changed', Lang.bind(this, this._readBookmarks));
+	// Create file monitors
+	this._fileMonitors = [];
+	for each (var path in this.bookmarkFilePaths) {
+            let file = Gio.file_new_for_path(path);
+            let monitor = file.monitor(Gio.FileMonitorFlags.NONE, null);
+            monitor.connect('changed', Lang.bind(this, this._readBookmarks));
+	    this._fileMonitors.push(monitor);
+	}
 
         return true;
     },
 
+    close : function() {
+	this._closeFileMonitors();
+    },
 
-    _getFirefoxDefaultProfile : function (firefoxProfileFile) {
-
-        let last_path, last_default, last_isrelative, default_path, default_isrelative;
-
-        if (GLib.file_test(firefoxProfileFile, GLib.FileTest.EXISTS) ) {
-            let filedata = GLib.file_get_contents(firefoxProfileFile, null, 0);
-
-            if (filedata[0]) {
-                let lines = String(filedata[1]).split('\n');
-
-                for (let i=0; i<lines.length; i++) {
-                    if (lines[i] == '') continue;           // empty lines
-
-                    var key_value = lines[i].match(/([^]*)=([^]*)/);
-                    if (key_value != null) {                // key-value pair
-                        if (key_value[1] == 'Path') last_path = key_value[2];
-                        if (key_value[1] == 'IsRelative') last_isrelative = key_value[2];
-                        if (key_value[1] == 'Default') last_default = key_value[2];
-
-                        default_path = last_path;
-                        default_isrelative = last_isrelative;
-                        if (last_default == 1) break; else continue;
-                    }
-                }
-            }
-
-        } else return [false, "File not exist"];
-
-        return [true, default_path, default_isrelative];
+    _closeFileMonitors : function() {
+	for each (var monitor in this._fileMonitors) {
+	    monitor.cancel();
+	}
+	this._fileMonitors = [];
     },
 
     // Read all bookmarks tree
     _readBookmarks : function () {
+	for each (var file in this.bookmarkFilePaths) {
+	    this._readBookmarksFromFile(file);
+	}
+	return true;
+    },
 
+    _readBookmarksFromFile : function(file) {
         let filedata;
         try {
-            filedata = GLib.file_get_contents(this.bookmarkFilePath, null, 0);
+            filedata = GLib.file_get_contents(file, null, 0);
         } catch (e) {
             Main.notifyError("Error reading file", e.message);
             return false;
@@ -140,95 +118,38 @@ const FirefoxBookmarksSearchProvider = new Lang.Class({
             return false;
         }
 
-        // Check to find right tree
-        let toolbarMenu = '';
-        for (let i = 0; i < jsondata.children.length; i++) {
-            let child = jsondata.children[i];
-
-            if (child.root == 'tagsFolder') continue;
-
-            this._readTree(child.children, this);
-        }
+        this._readTree(jsondata.roots.bookmark_bar);
+        this._readTree(jsondata.roots.other);
 
         return true;
     },
 
-    _readTree : function (node, parent) {
-
-        let child, menuItem, menuSep, menuSub, ident_prec;
-
-        // For each child ... 
-        for (let i = 0; i < node.length; i++) {
-            child = node[i];
-
-            if (child.hasOwnProperty('type')) {
-                if (child.type == 'text/x-moz-place') {
-                    this._configBookmarks.push([child.title, child.uri]);
-                }
-
-                if (child.type == 'text/x-moz-place-container') {
-                    this._readTree(child.children, menuSub);
-                }
+    _readTree : function (node) {
+        if (node.hasOwnProperty('type')) {
+            if (node.type == 'url') {
+                this._configBookmarks.push([node.name, node.url]);
             }
         }
+
+	for each (var child in node.children) {
+	    this._readTree(child);
+	}
     },
-
-    // Return complete path of bookmark json file
-    // bookmarkDir: dir of json bookmark file
-    _getBookmarkFilePath : function (bookmarkDir) {
-
-        let dir = '';
-        if ((bookmarkDir) && GLib.file_test(bookmarkDir, GLib.FileTest.IS_DIR) ) {
-            dir = Gio.file_new_for_path(bookmarkDir);
-            var backupEnum = dir.enumerate_children('standard::name,standard::type,time::modified',
-                                                    Gio.FileQueryInfoFlags.NONE, null);
-        } else {
-            Main.notifyError("Directory Error", bookmarkDir + " seems doesn't exist");
-            return false;
-        }
-
-        let infoTimeVal = new GLib.TimeVal();
-        let max = 0;
-        let info;
-        while ((info = backupEnum.next_file(null)) != null) {
-
-            let type = info.get_file_type();
-
-            if (type == Gio.FileType.REGULAR) {
-
-                let infoTimeVal = info.get_modification_time();
-
-                if (infoTimeVal.tv_sec > max) {
-                    max = infoTimeVal.tv_sec;
-                    var lastFile = info;
-
-                }
-            }
-        }
-        backupEnum.close(null);
-
-        if ( (typeof(lastFile) == 'undefined') || 
-                !GLib.file_test(GLib.build_filenamev([bookmarkDir, lastFile.get_name()]), GLib.FileTest.EXISTS) ) {
-            Main.notifyError("Directory Error", "It seems are no files in " + bookmarkDir);
-            return false;
-        }
-
-        return GLib.build_filenamev([bookmarkDir, lastFile.get_name()]);
-    },
-
-
 
     getResultMetas: function(resultIds) {
-
         let metas = [];
         
         for (let i = 0; i < resultIds.length; i++) {
-
             let resultId = resultIds[i];
-
             let appSys = Shell.AppSystem.get_default();
-            let app = appSys.lookup_heuristic_basename('firefox.desktop');
 
+            let app = appSys.lookup_heuristic_basename('google-chrome.desktop');
+	    let app_name = "google-chrome";
+	    if (!app) {
+		app = appSys.lookup_heuristic_basename('chromium.desktop');
+		app_name = "chromium";
+	    }
+	    
             let bookmark_name = "";
             if (resultId.name)
                 bookmark_name = resultId.name;
@@ -238,7 +159,7 @@ const FirefoxBookmarksSearchProvider = new Lang.Class({
             metas.push({ 'id': resultId,
                      'name': bookmark_name,
                      'createIcon': function(size) {
-                            let xicon = new Gio.ThemedIcon({name: 'firefox'});
+                            let xicon = new Gio.ThemedIcon({name: app_name});
                             return new St.Icon({icon_size: size, gicon: xicon});
                     }
             });
@@ -247,7 +168,8 @@ const FirefoxBookmarksSearchProvider = new Lang.Class({
     },
 
     activateResult: function(id) {
-        Util.spawn(['/usr/bin/firefox', '--new-tab', id.url]);
+	Gio.app_info_launch_default_for_uri(id.url, 
+					    global.create_app_launch_context());
     },
 
     _checkBookmarknames: function(bookmarks, terms) {
@@ -260,7 +182,6 @@ const FirefoxBookmarksSearchProvider = new Lang.Class({
                     let searchStr = name+url;
                     let pattern = new RegExp(terms[j],"gi");
                     if (searchStr.match(pattern)) {
-
                         searchResults.push({
                                 'name': name,
                                 'url': url
@@ -296,18 +217,16 @@ function init(meta) {
 }
 
 function enable() {
-    if (FBSearchProvider==null) {
-        FBSearchProvider = new FirefoxBookmarksSearchProvider();
-        Main.overview.addSearchProvider(FBSearchProvider);
+    if (chromeSearchProvider == null) {
+        chromeSearchProvider = new ChromeBookmarksSearchProvider();
+        Main.overview.addSearchProvider(chromeSearchProvider);
     }
 }
 
 function disable() {
-    if (FBSearchProvider!=null) {
-        Main.overview.removeSearchProvider(FBSearchProvider);
-        FBSearchProvider = null;
+    if (chromeSearchProvider != null) {
+        Main.overview.removeSearchProvider(chromeSearchProvider);
+	chromeSearchProvider.close()
+        chromeSearchProvider = null;
     }
-
-    bookmarkFileMonitor.cancel();
 }
-
