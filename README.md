@@ -1,17 +1,19 @@
-What is Search Firefox Bookmarks
-========================
+What is Search Chrome Bookmarks
+===============================
 
-Search Firefox Bookmarks (SFB) is a GNOME Shell extension which searches the firefox bookmarks and provides results in your shell overview
+Search Chrome Bookmarks (SCB) is a GNOME Shell extension which
+searches the Google Chrome (or Chromium) bookmarks and provides
+results in your shell overview.
 
+This extension is based on the "Search Firefox Bookmarks" by
+Stefano Ciancio.
 
 How to install
-========================
+==============
 
 Copy the tarball to $HOME/.local/share/gnome-shell/extensions
-and unpack it. A directory called searchfirefoxbookmarks@ciancio.net
+and unpack it. A directory called searchchromebookmarks@pav.iki.fi
 should be created. 
-
-For use by all users, install in /usr/share/gnome-shell/extensions (https://extensions.gnome.org/extension/149/search-firefox-bookmarks-provider/).
 
 Restart your GNOME shell (Alt-F2 r is one way) and enable the
 extension using gnome-tweak-tool (install it if not present).
@@ -23,22 +25,20 @@ the problem, use Looking Glass (Alt-F2 lg) to see what the
 error message is.
 
 Current Version
-========================
+===============
 
-Release 0.3.
+Release 0.1.
 
 Other Info
-========================
+==========
 
-SFB parse bookmarks backup json file that Firefox stores usually in the dir:
+SCB parses bookmark json files that Chrome stores usually in the dir:
 
-	$HOME/.mozilla/firefox/<profile dir>/bookmarkbackups/
+	$HOME/.config/google-chrome/<profile dir>/Bookmarks
+	$HOME/.config/chromium/<profile dir>/Bookmarks
 
-SFP try to retrieve the last json backup, but you can suggest the correct path by two way:
+SCP tries to retrieve the correct item, but you can suggest the
+correct path by two way:
 
-* setting a environment variable, FIREFOX_BOOKMARK_BACKUPS_DIR, with complete path of backup directory
-* setting a environment variable, FIREFOX_BOOKMARK_FILE, with complete path of json file backup
-
-
-Release 0.3: added support for IsRelative field in profiles.ini configuration file.
-
+* setting a environment variable, CHROME_BOOKMARK_FILE, with complete
+  path of json file backup
